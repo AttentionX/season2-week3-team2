@@ -10,7 +10,7 @@ from openai.error import (APIConnectionError, APIError, RateLimitError,
                           ServiceUnavailableError, Timeout)
 from retrying import retry
 
-OPENAI_MODEL = "gpt-3.5-turbo"
+OPENAI_MODEL = "gpt-4"
 OPENAI_RETRYABLE_ERRORS = (
     APIError,
     Timeout,
@@ -106,11 +106,30 @@ def openai_call_completion(
 
 
 def openai_call_chat_single(prompt, *args, **kwargs):
-    return openai_call_chat(
+    # Try to load the cache file
+    try:
+        with open('openai_calls.json', 'r') as f:
+            for line in f:
+                cached = json.loads(line)
+                # If the prompt matches, return the cached response
+                if cached["prompt"] == prompt:
+                    print("Found a cached response!")
+                    return cached["response"]
+    except FileNotFoundError:
+        print("Cache file not found, creating a new one.")
+
+    print_color(f"==OPENAI API CALL ====\n{prompt}\n===============", Colors.GREY)
+    out = openai_call_chat(
        messages=[
            {"role": "system", "content": "You are a helpful assistant."},
            {"role": "user", "content": prompt}], *args, **kwargs
     )
+    print_color(f"##OPENAI API RESPONSE ####\n{out}\n################", Colors.GREY)
+    with open('openai_calls.json', 'a') as f:
+        f.write(json.dumps({"prompt": prompt, "response": out}))
+        f.write("\n")
+
+    return out
 
 @retry(
     stop_max_attempt_number=99999,
@@ -187,9 +206,14 @@ class SimpleChatPromptTemplate:
         return "\n\n".join([f"{r}: {c}" for r, c in self.prompt])
 
 
-def parse_json_in_str(s: str):
+def parse_json_in_str(s: str, default: Any = []):
     s = f"-{s}-"
-    if not len(s.split("```")) == 3:
+    try:
+        if not len(s.split("```")) == 3:
+            print_color(f"Error during parsing: {s}", Colors.GREY)
+            return default
+        else:
+            return json.loads(s.split("```")[1])
+    except Exception as e:
         print_color(f"Error during parsing: {s}", Colors.GREY)
-    else:
-        return json.loads(s.split("```")[1])
+        return default
